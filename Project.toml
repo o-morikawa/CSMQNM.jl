@@ -5,7 +5,7 @@ version = "0.1.0"
 
 [deps]
 AutoTortoise = "73a9f6d8-9e5a-4f5a-8f3a-7e4c4f3f4b26"
-LambertW = "d0801e1a-52c2-58e8-a418-d4e0b8ac9a62"
+LambertW = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 

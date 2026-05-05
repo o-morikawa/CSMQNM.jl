@@ -377,7 +377,7 @@ function write_potential(cfg::RunConfig, path::AbstractString)
     open(path, "w") do io
         println(io, "# x  V(x)")
         for x in cfg.integration.xmin:cfg.integration.dx:cfg.integration.xmax
-            @printf(io, "% .12e % .12e\n", x, potential_value(cfg.physics, x))
+            @printf(io, "% .12f % .12f\n", x, potential_value(cfg.physics, x))
         end
     end
     return path
@@ -389,7 +389,7 @@ function write_spectrum(result::QNMResult, path::AbstractString)
         for i in eachindex(result.energy)
             E = result.energy[i]
             w = result.omega[i]
-            @printf(io, "%5d % .12e % .12e % .12e % .12e\n", i, real(E), imag(E), real(w), imag(w))
+            @printf(io, "%5d % .12f % .12f % .12f % .12f\n", i, real(E), imag(E), real(w), imag(w))
         end
     end
     return path

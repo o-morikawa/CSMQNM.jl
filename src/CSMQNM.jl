@@ -11,7 +11,13 @@ export solve_qnm, solve_qnm_from_dict, write_potential, potential_value, potenti
 const DEG = π / 180
 const ORTHOGONALIZATION_CUTOFF = 1e-5
 
-"Polynomial times Gaussian basis. `range = :real` or `:complex`."
+"""
+Polynomial times Gaussian basis.
+
+`range = :real` uses real Gaussian ranges.  `range = :complex` uses only the
+`1 + im*beta` complex-range branch; the conjugate `1 - im*beta` branch is not
+included because it is not convergent in the intended complex-scaled sector.
+"""
 Base.@kwdef struct BasisConfig
     imax::Int = 30
     nmax::Int = 3
@@ -129,7 +135,22 @@ function validate_config(cfg::RunConfig)
     cfg.basis.rmax > cfg.basis.r0 || error("basis.rmax must be larger than basis.r0.")
     cfg.integration.dx > 0 || error("integration.dx must be positive.")
     cfg.integration.xmax > cfg.integration.xmin || error("integration.xmax must be larger than integration.xmin.")
+    if cfg.basis.range === :complex
+        validate_complex_range(cfg.basis, cfg.csm)
+    end
     canonical_potential_label(cfg.physics)
+    return nothing
+end
+
+function validate_complex_range(basis::BasisConfig, csm::CSMConfig)
+    basis.beta > 0 || error("For basis.range = :complex, basis.beta must be positive.")
+    theta = csm.the0 * DEG
+    0 < theta < π / 2 || error("For basis.range = :complex, the scaling angle must satisfy 0 < theta < π/2. Got the0=$(csm.the0) degrees.")
+    damping = cos(2theta) + basis.beta * sin(2theta)
+    if damping <= 0
+        beta_min = -cot(2theta)
+        error("The complex-range Gaussian basis is not convergent: cos(2theta) + beta*sin(2theta) = $damping <= 0. Choose beta > $beta_min for theta=$(csm.the0) degrees.")
+    end
     return nothing
 end
 
@@ -159,10 +180,11 @@ channel_c(c) = c === :vector ? 1 : c === :tensor ? 2 : Int(c)
 
 function normalization_polynomial(basis::BasisConfig)
     imax, nmax = basis.imax, basis.nmax
-    nrange = basis.range === :real ? 1 : 2
+    nrange = 1
     base_ranges = [basis.r0 * (basis.rmax / basis.r0)^((i - 1) / (imax - 1)) for i in 1:imax]
-    alpha_base = basis.range === :real ? ComplexF64.(1.0 ./ base_ranges.^2) :
-        ComplexF64.(vcat((1.0 + im * basis.beta) ./ base_ranges.^2, (1.0 - im * basis.beta) ./ base_ranges.^2))
+    alpha_base = basis.range === :real ?
+        ComplexF64.(1.0 ./ base_ranges.^2) :
+        ComplexF64.((1.0 + im * basis.beta) ./ base_ranges.^2)
 
     nb = imax * nrange * (nmax + 1)
     alpha = Vector{ComplexF64}(undef, nb)
@@ -179,7 +201,7 @@ function normalization_polynomial(basis::BasisConfig)
 end
 
 basis_index(k::Integer, n::Integer, ibase::Integer) = n * ibase + k
-basis_dimension(basis::BasisConfig) = basis.imax * (basis.range === :real ? 1 : 2) * (basis.nmax + 1)
+basis_dimension(basis::BasisConfig) = basis.imax * (basis.nmax + 1)
 
 function gaussian_moment(power::Integer, a)
     isodd(power) && return zero(a)
@@ -188,7 +210,7 @@ function gaussian_moment(power::Integer, a)
 end
 
 function norm_matrix_polynomial(basis::BasisConfig, cn, alpha)
-    ibase = basis.imax * (basis.range === :real ? 1 : 2)
+    ibase = basis.imax
     dim = basis_dimension(basis)
     nmat = zeros(ComplexF64, dim, dim)
     for np in 0:basis.nmax, n in 0:np
@@ -204,7 +226,7 @@ function norm_matrix_polynomial(basis::BasisConfig, cn, alpha)
 end
 
 function kinetic_matrix_polynomial(basis::BasisConfig, cn, alpha, theta)
-    ibase = basis.imax * (basis.range === :real ? 1 : 2)
+    ibase = basis.imax
     dim = basis_dimension(basis)
     kmat = zeros(ComplexF64, dim, dim)
     for np in 0:basis.nmax, n in 0:np
@@ -228,7 +250,7 @@ end
 
 function potential_matrix_polynomial(cfg::RunConfig, cn, alpha, theta)
     basis, integ = cfg.basis, cfg.integration
-    ibase = basis.imax * (basis.range === :real ? 1 : 2)
+    ibase = basis.imax
     dim = basis_dimension(basis)
     vmat = zeros(ComplexF64, dim, dim)
     xs = collect(integ.xmin:integ.dx:integ.xmax)

@@ -1,6 +1,6 @@
 name = "CSMQNM"
 uuid = "3fa39554-b684-4cb2-9e36-721c8868b9f1"
-authors = ["Shoya Ogawa, Okuto Morikawa and collaborators"]
+authors = ["Shoya Ogawa", "Okuto Morikawa"]
 version = "0.1.0"
 
 [deps]

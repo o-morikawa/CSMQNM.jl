@@ -1,0 +1,14 @@
+name = "CSMQNM"
+uuid = "3fa39554-b684-4cb2-9e36-721c8868b9f1"
+authors = ["Shoya Ogawa, Okuto Morikawa and collaborators"]
+version = "0.1.0"
+
+[deps]
+AutoTortoise = "4e1e3998-34ef-4ba2-86e1-4d9f8fca1a6a"
+LambertW = "d0801e1a-52c2-58e8-a418-d4e0b8ac9a62"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+LambertW = "1"
+julia = "1.9"

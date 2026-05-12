@@ -99,21 +99,38 @@ end
 function solve_qnm(cfg::RunConfig)
     validate_config(cfg)
     basis = cfg.basis
-    csm = cfg.csm
-    integ = cfg.integration
-    theta = csm.the0 * DEG
+    theta = cfg.csm.the0 * DEG
 
-    cn, alpha = normalization_polynomial(basis)
-    nmat = norm_matrix_polynomial(basis, cn, alpha)
-    kmat = kinetic_matrix_polynomial(basis, cn, alpha, theta)
-    vmat = potential_matrix_polynomial(cfg, cn, alpha, theta)
-    h0 = kmat + vmat
+    if basis.range === :real
+        cn, alpha = normalization_polynomial(basis)
+        nmat = norm_matrix_polynomial(basis, cn, alpha)
+        kmat = kinetic_matrix_polynomial(basis, cn, alpha, theta)
+        vmat = potential_matrix_polynomial(cfg, cn, alpha, theta)
+        h0 = kmat + vmat
 
-    h, kept, dropped = orthogonalize_basis(nmat, h0)
-    ene = eigvals(h)
+        h, kept, dropped = orthogonalize_basis(nmat, h0)
+        ene = eigvals(h)
+        stored_hamiltonian = h
+    else
+        cne, cno, alpha = normalization_complex_gaussian(basis)
+        nmat = norm_matrix_complex_gaussian(basis, cne, cno, alpha)
+        kmat = kinetic_matrix_complex_gaussian(basis, cne, cno, alpha, theta)
+        vmat = potential_matrix_complex_gaussian(cfg, cne, cno, alpha, theta)
+        h0 = kmat + vmat
+
+        # For complex-range bases the overlap matrix is complex symmetric, not
+        # Hermitian.  The real-range orthogonalization routine based on an
+        # overlap eigendecomposition is therefore numerically unsafe here.
+        # Use the generalized eigenvalue problem directly, as in the original
+        # complex-range branch.
+        ene = eigvals(h0, nmat)
+        kept = size(h0, 1)
+        dropped = 0
+        stored_hamiltonian = h0
+    end
+
     omega = select_qnm_branch.(sqrt.(ene))
-
-    result = QNMResult(ComplexF64.(ene), ComplexF64.(omega), h, size(h0, 1), kept, dropped, cfg)
+    result = QNMResult(ComplexF64.(ene), ComplexF64.(omega), Matrix{ComplexF64}(stored_hamiltonian), size(stored_hamiltonian, 1), kept, dropped, cfg)
 
     if cfg.output.write_potential
         path = something(cfg.output.potential_path, default_potential_filename(cfg))
@@ -200,8 +217,21 @@ function normalization_polynomial(basis::BasisConfig)
     return cn, alpha
 end
 
+function normalization_complex_gaussian(basis::BasisConfig)
+    imax = basis.imax
+    ranges = [basis.r0 * (basis.rmax / basis.r0)^((i - 1) / (imax - 1)) for i in 1:imax]
+    alpha = ComplexF64.((1.0 + im * basis.beta) ./ ranges.^2)
+    cne = Vector{ComplexF64}(undef, imax)
+    cno = Vector{ComplexF64}(undef, imax)
+    for i in 1:imax
+        cne[i] = (2.0 * alpha[i] / π)^0.25
+        cno[i] = sqrt(2.0^2.5 * alpha[i]^1.5 / sqrt(π))
+    end
+    return cne, cno, alpha
+end
+
 basis_index(k::Integer, n::Integer, ibase::Integer) = n * ibase + k
-basis_dimension(basis::BasisConfig) = basis.imax * (basis.nmax + 1)
+basis_dimension(basis::BasisConfig) = basis.range === :complex ? 2 * basis.imax : basis.imax * (basis.nmax + 1)
 
 function gaussian_moment(power::Integer, a)
     isodd(power) && return zero(a)
@@ -271,6 +301,85 @@ function potential_matrix_polynomial(cfg::RunConfig, cn, alpha, theta)
             vmat[i, j] = val
             vmat[j, i] = val
         end
+    end
+    return vmat
+end
+
+function norm_matrix_complex_gaussian(basis::BasisConfig, cne, cno, alpha)
+    imax = basis.imax
+    dim = 2 * imax
+    nmat = zeros(ComplexF64, dim, dim)
+    for i in 1:imax, j in 1:i
+        a = alpha[i] + alpha[j]
+        val = cne[i] * cne[j] * sqrt(π) / sqrt(a)
+        nmat[i, j] = val
+        nmat[j, i] = val
+
+        val = cno[i] * cno[j] * sqrt(π) / (2.0 * a^1.5)
+        nmat[i + imax, j + imax] = val
+        nmat[j + imax, i + imax] = val
+    end
+    return nmat
+end
+
+function kinetic_matrix_complex_gaussian(basis::BasisConfig, cne, cno, alpha, theta)
+    imax = basis.imax
+    dim = 2 * imax
+    kmat = zeros(ComplexF64, dim, dim)
+    pref = exp(-2im * theta)
+    for i in 1:imax, j in 1:i
+        a = alpha[i] + alpha[j]
+        val = pref * cne[i] * cne[j] * 2.0 * sqrt(π) * alpha[i] * alpha[j] / a^1.5
+        kmat[i, j] = val
+        kmat[j, i] = val
+
+        val = pref * cno[i] * cno[j] * 3.0 * sqrt(π) * alpha[i] * alpha[j] / a^2.5
+        kmat[i + imax, j + imax] = val
+        kmat[j + imax, i + imax] = val
+    end
+    return kmat
+end
+
+function potential_matrix_complex_gaussian(cfg::RunConfig, cne, cno, alpha, theta)
+    basis, integ = cfg.basis, cfg.integration
+    imax = basis.imax
+    dim = 2 * imax
+    vmat = zeros(ComplexF64, dim, dim)
+    xs = collect(integ.xmin:integ.dx:integ.xmax)
+    pot = [potential_value(cfg.physics, x) for x in xs]
+
+    for i in 1:imax, j in 1:i
+        a = (alpha[i] + alpha[j]) * exp(-2im * theta)
+
+        fsum = zero(ComplexF64)
+        for k in eachindex(xs)
+            x = xs[k]
+            fsum += pot[k] * exp(-a * x^2) * integ.dx
+        end
+        val = exp(-im * theta) * cne[i] * cne[j] * fsum
+        vmat[i, j] = val
+        vmat[j, i] = val
+
+        fsum = zero(ComplexF64)
+        for k in eachindex(xs)
+            x = xs[k]
+            fsum += pot[k] * x^2 * exp(-a * x^2) * integ.dx
+        end
+        val = exp(-3im * theta) * cno[i] * cno[j] * fsum
+        vmat[i + imax, j + imax] = val
+        vmat[j + imax, i + imax] = val
+    end
+
+    for i in 1:imax, j in 1:imax
+        a = (alpha[i] + alpha[j]) * exp(-2im * theta)
+        fsum = zero(ComplexF64)
+        for k in eachindex(xs)
+            x = xs[k]
+            fsum += pot[k] * x * exp(-a * x^2) * integ.dx
+        end
+        val = exp(-2im * theta) * cne[i] * cno[j] * fsum
+        vmat[i, j + imax] = val
+        vmat[j + imax, i] = val
     end
     return vmat
 end
@@ -377,7 +486,7 @@ function write_potential(cfg::RunConfig, path::AbstractString)
     open(path, "w") do io
         println(io, "# x  V(x)")
         for x in cfg.integration.xmin:cfg.integration.dx:cfg.integration.xmax
-            @printf(io, "% .12f % .12f\n", x, potential_value(cfg.physics, x))
+            @printf(io, "% .12e % .12e\n", x, potential_value(cfg.physics, x))
         end
     end
     return path
@@ -389,7 +498,7 @@ function write_spectrum(result::QNMResult, path::AbstractString)
         for i in eachindex(result.energy)
             E = result.energy[i]
             w = result.omega[i]
-            @printf(io, "%5d % .12f % .12f % .12f % .12f\n", i, real(E), imag(E), real(w), imag(w))
+            @printf(io, "%5d % .12e % .12e % .12e % .12e\n", i, real(E), imag(E), real(w), imag(w))
         end
     end
     return path

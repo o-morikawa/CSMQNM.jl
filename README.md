@@ -177,4 +177,4 @@ Set `OutputConfig(write_spectrum=true)` to write a spectrum file, and `OutputCon
 
 ## Notes on the current scope
 
-This package skeleton keeps the single-channel QNM computation only. The old CLD code, hand-picked CLD pole indices, stand-alone real-range Gaussian branch, stand-alone complex-range Gaussian branch with both conjugate branches, and trigonometric basis branch were deliberately removed. The `:stringy_ads_ds` label remains as a placeholder because the original implementation is coupled-channel and should be refactored separately rather than forced into the single-channel API.
+This package skeleton keeps the single-channel QNM computation only. The old CLD code, hand-picked CLD pole indices, stand-alone real-range Gaussian branch, complex-range Gaussian conjugate branch, and trigonometric basis branch were deliberately removed. The `:stringy_ads_ds` label remains as a placeholder because the original implementation is coupled-channel and should be refactored separately rather than forced into the single-channel API.

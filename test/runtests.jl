@@ -5,7 +5,7 @@ using CSMQNM
     @test CSMQNM.canonical_potential_label(Dict(:ipot=>1)) == :schwarzschild_rw
     @test CSMQNM.canonical_potential_label(Dict(:ipot=>:sds_dim_rw)) == :sds_dim_rw
     @test CSMQNM.basis_dimension(BasisConfig(imax=4, nmax=2, range=:real)) == 12
-    @test CSMQNM.basis_dimension(BasisConfig(imax=4, nmax=2, range=:complex)) == 12
+    @test CSMQNM.basis_dimension(BasisConfig(imax=4, nmax=2, range=:complex)) == 8
 end
 
 @testset "complex range validation" begin
@@ -39,4 +39,18 @@ end
     result = solve_qnm(cfg)
     @test length(result.energy) == result.basis_size_after
     @test all(imag.(result.omega) .<= 1e-12)
+end
+
+@testset "full small complex-range solve" begin
+    cfg = RunConfig(
+        basis = BasisConfig(imax=4, nmax=3, r0=0.2, rmax=4.0, range=:complex, beta=π/2),
+        csm = CSMConfig(the0=42.0),
+        integration = IntegrationConfig(xmin=-5.0, xmax=5.0, dx=0.5),
+        physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
+    )
+    result = solve_qnm(cfg)
+    @test length(result.energy) == 2 * cfg.basis.imax
+    @test result.dropped_basis_vectors == 0
+    @test all(isfinite, real.(result.energy))
+    @test all(isfinite, imag.(result.energy))
 end

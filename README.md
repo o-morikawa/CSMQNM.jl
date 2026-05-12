@@ -210,6 +210,8 @@ where `x` is a real finite-difference grid and `z` is the complex tortoise coord
 - J^{-1} d/dx [ J^{-1} d/dx ],   J = dg/dx.
 ```
 
+In `src/ECS.jl` this is discretized in conservative three-point flux form on the interior grid points.  The flux coefficient `J^{-1}` is evaluated at half-grid midpoints, so the matrix is tridiagonal rather than a product of two first-derivative matrices.  This is intended to avoid even/odd grid decoupling artifacts in the ECS continuum.
+
 The potential is evaluated as `V(z)` through the same `potential_value` interface used by the CSM backend.  For dS/(A)dS potentials this calls `AutoTortoise.inverse_tortoise`, so this backend assumes that `AutoTortoise.jl` correctly handles the required complex inverse tortoise map along the chosen ECS contour.
 
 A minimal Schwarzschild ECS example is

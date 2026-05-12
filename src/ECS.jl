@@ -104,7 +104,7 @@ function solve_qnm_ecs(cfg::ECSRunConfig)
     J = ComplexF64[ecs_jacobian(xj, e) for xj in x]
     Vfull = ComplexF64[potential_value(cfg.physics, zj) for zj in z]
 
-    H = ecs_kinetic_matrix(J, dx) + Diagonal(Vfull[2:end-1])
+    H = ecs_kinetic_matrix(x, e) + Diagonal(Vfull[2:end-1])
     ene = eigvals(Matrix(H))
     ene = ComplexF64[w for w in ene if isfinite(real(w)) && isfinite(imag(w))]
     omega = select_qnm_branch.(sqrt.(ene))
@@ -131,6 +131,61 @@ function solve_qnm_ecs(cfg::ECSRunConfig)
     return result
 end
 
+"""
+    ecs_kinetic_matrix(x, ecs)
+
+Build the ECS kinetic-energy matrix on the interior grid points.  Dirichlet
+boundary conditions are imposed by dropping the two endpoint degrees of freedom.
+
+This is a conservative three-point flux-form discretization of
+
+    -J(x)^(-1) d/dx [ J(x)^(-1) d/dx ],
+
+where J(x) = dg/dx.  The half-grid coefficients are evaluated at the
+midpoints x[j+1/2], which is more robust than composing two first-derivative
+matrices and avoids even/odd grid decoupling artifacts.
+"""
+function ecs_kinetic_matrix(x::AbstractVector{<:Real}, ecs::ECSConfig)
+    nx = length(x)
+    nx >= 3 || error("At least three grid points are required.")
+
+    dx = x[2] - x[1]
+    all(abs((x[j + 1] - x[j]) - dx) <= 100eps(Float64) * max(1.0, abs(dx)) for j in 1:nx-1) ||
+        error("ecs_kinetic_matrix currently requires a uniform grid.")
+
+    n = nx - 2
+    T = zeros(ComplexF64, n, n)
+
+    # Node values on the interior points.
+    Jinv_node = ComplexF64[1.0 / ecs_jacobian(x[j], ecs) for j in 2:nx-1]
+
+    # Half-grid flux coefficients A_{j+1/2} = 1/J(x_{j+1/2}).
+    # There are nx-1 intervals in the full grid.
+    Jinv_half = ComplexF64[
+        1.0 / ecs_jacobian(0.5 * (x[j] + x[j + 1]), ecs) for j in 1:nx-1
+    ]
+
+    invdx2 = 1.0 / dx^2
+    for row in 1:n
+        full_j = row + 1
+        Aminus = Jinv_half[full_j - 1]
+        Aplus = Jinv_half[full_j]
+        pref = Jinv_node[row] * invdx2
+
+        T[row, row] = pref * (Aminus + Aplus)
+        if row > 1
+            T[row, row - 1] = -pref * Aminus
+        end
+        if row < n
+            T[row, row + 1] = -pref * Aplus
+        end
+    end
+    return T
+end
+
+# Backward-compatible low-level constructor.  This keeps old internal calls
+# working, but the preferred ECS path is `ecs_kinetic_matrix(x, ecs)` because it
+# evaluates the flux coefficients at half-grid points.
 function ecs_kinetic_matrix(J::AbstractVector{<:Complex}, dx::Real)
     nx = length(J)
     n = nx - 2
@@ -141,12 +196,12 @@ function ecs_kinetic_matrix(J::AbstractVector{<:Complex}, dx::Real)
         Aplus = 0.5 * (Jinv[j] + Jinv[j + 1])
         Aminus = 0.5 * (Jinv[j] + Jinv[j - 1])
         pref = Jinv[j] / dx^2
-        T[row, row] += pref * (Aplus + Aminus)
+        T[row, row] = pref * (Aplus + Aminus)
         if row < n
-            T[row, row + 1] += -pref * Aplus
+            T[row, row + 1] = -pref * Aplus
         end
         if row > 1
-            T[row, row - 1] += -pref * Aminus
+            T[row, row - 1] = -pref * Aminus
         end
     end
     return T

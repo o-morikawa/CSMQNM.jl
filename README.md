@@ -77,7 +77,7 @@ For `range = :complex`, the Gaussian range is defined by
 alpha_i = (1 + im * beta) / r_i^2
 ```
 
-Only this branch is used. The conjugate branch
+Only this branch is used for all polynomial orders `n = 0, ..., nmax`. The conjugate branch
 
 ```julia
 (1 - im * beta) / r_i^2
@@ -104,6 +104,21 @@ The package throws an error when this condition is violated. In particular:
 - For `pi/4 < theta < pi/2`, `beta` must be large enough to satisfy `beta > -cot(2 theta)`.
 
 The scaling angle input `the0` is in degrees, so the above check is applied after converting `theta = the0 * pi / 180`.
+
+For `range = :complex`, the package keeps the Polynomial x complex-range Gaussian basis with dimension
+
+```julia
+imax * (nmax + 1)
+```
+
+and solves the generalized eigenvalue problem directly:
+
+```julia
+H * c = E * N * c
+```
+
+The real-range `orthogonalize_basis` step is deliberately skipped for this branch because the complex-range overlap matrix is complex symmetric rather than Hermitian.
+
 
 ## Potential labels
 
@@ -167,7 +182,7 @@ For `:sds_dim_rw`, `:c=>:vector` and `:c=>:tensor` are aliases for `1` and `2`.
 ```julia
 result.energy              # eigenvalues E = omega^2
 result.omega               # QNM branch selected with Im(omega) <= 0
-result.hamiltonian         # orthogonalized Hamiltonian matrix
+result.hamiltonian         # orthogonalized H for :real, raw H for :complex
 result.basis_size_before
 result.basis_size_after
 result.dropped_basis_vectors
@@ -177,4 +192,4 @@ Set `OutputConfig(write_spectrum=true)` to write a spectrum file, and `OutputCon
 
 ## Notes on the current scope
 
-This package skeleton keeps the single-channel QNM computation only. The old CLD code, hand-picked CLD pole indices, stand-alone real-range Gaussian branch, complex-range Gaussian conjugate branch, and trigonometric basis branch were deliberately removed. The `:stringy_ads_ds` label remains as a placeholder because the original implementation is coupled-channel and should be refactored separately rather than forced into the single-channel API.
+This package skeleton keeps the single-channel QNM computation only. The old CLD code, hand-picked CLD pole indices, stand-alone real-range Gaussian branch, complex-range Gaussian conjugate branch, and trigonometric basis branch were deliberately removed. The complex-range option is Polynomial x complex-range Gaussian, not the old even/odd-only complex Gaussian branch. The `:stringy_ads_ds` label remains as a placeholder because the original implementation is coupled-channel and should be refactored separately rather than forced into the single-channel API.

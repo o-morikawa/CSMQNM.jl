@@ -101,6 +101,20 @@ end
     @test isapprox(D * ones(6), zeros(6); atol=1e-10)
 end
 
+
+@testset "FEDVR bridge connectivity" begin
+    e = FEDVRECSConfig(xmin=-2.0, xmax=2.0, nelements=4, order=6)
+    breaks = CSMQNM.fedvr_element_breaks(e)
+    ξ, w = CSMQNM.legendre_gll(e.order)
+    x, l2g, scale = CSMQNM.fedvr_bridge_connectivity(e, breaks, ξ, w)
+    @test length(x) == e.nelements * (e.order - 1) - 1
+    @test l2g[1, 1] == 0
+    @test l2g[end, end] == 0
+    @test l2g[1, end] == l2g[2, 1]
+    @test scale[1, end] > 0
+    @test scale[2, 1] > 0
+end
+
 @testset "small Schwarzschild FEDVR-ECS solve" begin
     cfg = FEDVRECSRunConfig(
         ecs = FEDVRECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nelements=8, order=6, x0_left=3.0, x0_right=3.0),

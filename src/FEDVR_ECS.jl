@@ -153,6 +153,7 @@ function fedvr_element_breaks(e::FEDVRECSConfig)
     end
 end
 
+
 function fedvr_global_grid(e::FEDVRECSConfig)
     breaks = fedvr_element_breaks(e)
     ξ, wξ = legendre_gll(e.order)
@@ -173,14 +174,60 @@ function fedvr_global_grid(e::FEDVRECSConfig)
     return x, breaks, ξ, wξ, Dξ
 end
 
+"Connectivity for a continuous, bridge-function FEDVR basis."
+function fedvr_bridge_connectivity(e::FEDVRECSConfig, breaks, ξ, wξ)
+    nloc = e.order
+    ne = length(breaks) - 1
+    local_to_global = zeros(Int, ne, nloc)
+    local_scale = zeros(Float64, ne, nloc)
+    global_x = Float64[]
+
+    add_dof!(xval) = (push!(global_x, xval); length(global_x))
+
+    left_endpoint_weight(el) = 0.5 * (breaks[el + 1] - breaks[el]) * wξ[1]
+    right_endpoint_weight(el) = 0.5 * (breaks[el + 1] - breaks[el]) * wξ[end]
+
+    # Element-internal Lobatto nodes are ordinary local DVR basis functions.
+    for el in 1:ne
+        a, b = breaks[el], breaks[el + 1]
+        h = b - a
+        for l in 2:nloc-1
+            xval = 0.5 * (a + b) + 0.5 * h * ξ[l]
+            g = add_dof!(xval)
+            local_to_global[el, l] = g
+            local_scale[el, l] = 1.0
+        end
+    end
+
+    # Internal element boundaries are single bridge functions, not two independent
+    # left/right endpoint functions.  This imposes C0 continuity at every element
+    # interface and removes interface-localized spurious degrees of freedom.
+    for k in 1:ne-1
+        wL = right_endpoint_weight(k)
+        wR = left_endpoint_weight(k + 1)
+        wsum = wL + wR
+        g = add_dof!(breaks[k + 1])
+        local_to_global[k, nloc] = g
+        local_to_global[k + 1, 1] = g
+        local_scale[k, nloc] = sqrt(wL / wsum)
+        local_scale[k + 1, 1] = sqrt(wR / wsum)
+    end
+
+    # External endpoints are skipped; this is homogeneous Dirichlet boundary data.
+    return global_x, local_to_global, local_scale
+end
+
 function fedvr_ecs_matrices(cfg::FEDVRECSRunConfig)
     validate_fedvr_ecs_config(cfg)
     e = cfg.ecs
-    x, breaks, ξ, wξ, Dξ = fedvr_global_grid(e)
+    breaks = fedvr_element_breaks(e)
+    ξ, wξ = legendre_gll(e.order)
+    Dξ = lagrange_derivative_matrix(ξ)
     nloc = e.order
     ne = length(breaks) - 1
-    nglobal = length(x)
 
+    x, local_to_global, local_scale = fedvr_bridge_connectivity(e, breaks, ξ, wξ)
+    nglobal = length(x)
     H = zeros(ComplexF64, nglobal, nglobal)
     N = zeros(ComplexF64, nglobal, nglobal)
 
@@ -203,37 +250,47 @@ function fedvr_ecs_matrices(cfg::FEDVRECSRunConfig)
         h = b - a
         scale_dx = 2.0 / h
         jac_phys = h / 2.0
-        offset = (el - 1) * (nloc - 1)
-        inds = offset .+ (1:nloc)
 
-        # Local weak form with GLL quadrature:
-        # K_ab = ∫ dx J^{-1} dB_a/dx dB_b/dx,
-        # N_ab = ∫ dx J B_a B_b,
-        # V_ab = ∫ dx J V B_a B_b.
+        xloc = [0.5 * (a + b) + 0.5 * h * ξ[l] for l in 1:nloc]
+        zloc = ComplexF64[ecs_contour(xq, contour_cfg) for xq in xloc]
+        Jloc = ComplexF64[ecs_jacobian(xq, contour_cfg) for xq in xloc]
+        Vloc = ComplexF64[potential_value(cfg.physics, zq) for zq in zloc]
+        wx = jac_phys .* wξ
+
+        # Local DVR-normalized basis χ_l = L_l/sqrt(wx_l).
+        # GLL quadrature makes the mass and potential terms diagonal locally;
+        # bridges are applied by a congruence assembly with local_scale.
+        Kloc = zeros(ComplexF64, nloc, nloc)
         for aidx in 1:nloc
-            ga = inds[aidx]
             for bidx in 1:nloc
-                gb = inds[bidx]
-                kval = 0.0 + 0.0im
+                val = 0.0 + 0.0im
                 for q in 1:nloc
-                    gq = inds[q]
-                    dBa = scale_dx * Dξ[q, aidx]
-                    dBb = scale_dx * Dξ[q, bidx]
-                    kval += jac_phys * wξ[q] * (1.0 / J[gq]) * dBa * dBb
+                    dχa = scale_dx * Dξ[q, aidx] / sqrt(wx[aidx])
+                    dχb = scale_dx * Dξ[q, bidx] / sqrt(wx[bidx])
+                    val += wx[q] * (1.0 / Jloc[q]) * dχa * dχb
                 end
-                H[ga, gb] += kval
+                Kloc[aidx, bidx] = val
             end
-            # DVR diagonal mass and potential terms.
-            g = ga
-            weight = jac_phys * wξ[aidx]
-            N[g, g] += weight * J[g]
-            H[g, g] += weight * J[g] * V[g]
+        end
+        Nloc = Diagonal(ComplexF64[Jloc[l] for l in 1:nloc])
+        Vlocmat = Diagonal(ComplexF64[Jloc[l] * Vloc[l] for l in 1:nloc])
+        Hloc = Kloc + Matrix(Vlocmat)
+
+        for aidx in 1:nloc
+            ga = local_to_global[el, aidx]
+            ga == 0 && continue
+            sa = local_scale[el, aidx]
+            for bidx in 1:nloc
+                gb = local_to_global[el, bidx]
+                gb == 0 && continue
+                sb = local_scale[el, bidx]
+                H[ga, gb] += sa * sb * Hloc[aidx, bidx]
+                N[ga, gb] += sa * sb * Nloc[aidx, bidx]
+            end
         end
     end
 
-    # Dirichlet endpoints: remove first and last global nodes.
-    interior = 2:nglobal-1
-    return H[interior, interior], N[interior, interior], x[interior], z[interior], J[interior], V[interior]
+    return H, N, x, z, J, V
 end
 
 function solve_qnm_ecs_fedvr(cfg::FEDVRECSRunConfig)

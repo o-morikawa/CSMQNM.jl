@@ -296,8 +296,12 @@ V_ab = ∫ dx J(x) B_a(x) V(g(x)) B_b(x).
 ```
 
 The DVR quadrature makes the potential and overlap matrices diagonal up to the
-finite-element endpoint sharing.  Dirichlet boundary conditions are imposed by
-removing the two endpoint degrees of freedom.
+finite-element endpoint sharing.  Internal element boundaries are represented by
+explicit bridge functions: the right endpoint of one element and the left
+endpoint of the next element are merged into a single continuous basis function.
+This enforces C0 continuity at element interfaces and avoids independent
+left/right endpoint degrees of freedom.  Dirichlet boundary conditions are
+imposed by removing the two external endpoint degrees of freedom.
 
 A minimal example is
 

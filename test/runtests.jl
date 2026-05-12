@@ -54,3 +54,22 @@ end
     @test all(isfinite, real.(result.energy))
     @test all(isfinite, imag.(result.energy))
 end
+
+@testset "ECS configuration and contour" begin
+    ecs = ECSConfig(theta_deg=60.0, xmin=-10.0, xmax=10.0, nx=101, x0_left=3.0, x0_right=3.0)
+    @test CSMQNM.ecs_contour(0.0, ecs) == 0.0 + 0.0im
+    @test CSMQNM.ecs_jacobian(0.0, ecs) == 1.0 + 0.0im
+    @test CSMQNM.ecs_jacobian(5.0, ecs) ≈ exp(im * 60.0 * π / 180)
+end
+
+@testset "small Schwarzschild ECS solve" begin
+    cfg = ECSRunConfig(
+        ecs = ECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nx=81, x0_left=3.0, x0_right=3.0),
+        physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
+    )
+    result = solve_qnm_ecs(cfg)
+    @test length(result.energy) == cfg.ecs.nx - 2
+    @test length(result.x) == cfg.ecs.nx - 2
+    @test all(isfinite, real.(result.energy))
+    @test all(isfinite, imag.(result.energy))
+end

@@ -193,3 +193,73 @@ Set `OutputConfig(write_spectrum=true)` to write a spectrum file, and `OutputCon
 ## Notes on the current scope
 
 This package skeleton keeps the single-channel QNM computation only. The old CLD code, hand-picked CLD pole indices, stand-alone real-range Gaussian branch, complex-range Gaussian conjugate branch, and trigonometric basis branch were deliberately removed. The complex-range option is Polynomial x complex-range Gaussian, not the old even/odd-only complex Gaussian branch. The `:stringy_ads_ds` label remains as a placeholder because the original implementation is coupled-channel and should be refactored separately rather than forced into the single-channel API.
+
+## ECS finite-difference backend
+
+In addition to the original Gaussian-basis CSM backend, the package now contains an experimental ECS backend in `src/ECS.jl`.  The existing CSM code is kept in `src/CSM.jl`, and `src/CSMQNM.jl` only loads the two backends.
+
+The ECS backend is intended for exploratory calculations beyond the practical `theta < pi/4` limitation of global real-range Gaussian matrix elements.  It discretizes the Schrödinger operator directly on an exterior-complex-scaled contour,
+
+```text
+z = g(x),
+```
+
+where `x` is a real finite-difference grid and `z` is the complex tortoise coordinate.  The finite-difference kinetic operator is built from
+
+```text
+- J^{-1} d/dx [ J^{-1} d/dx ],   J = dg/dx.
+```
+
+The potential is evaluated as `V(z)` through the same `potential_value` interface used by the CSM backend.  For dS/(A)dS potentials this calls `AutoTortoise.inverse_tortoise`, so this backend assumes that `AutoTortoise.jl` correctly handles the required complex inverse tortoise map along the chosen ECS contour.
+
+A minimal Schwarzschild ECS example is
+
+```julia
+using CSMQNM
+
+cfg = ECSRunConfig(
+    ecs = ECSConfig(
+        theta_deg = 60.0,
+        xmin = -120.0,
+        xmax = 120.0,
+        nx = 1201,
+        x0_left = 40.0,
+        x0_right = 40.0,
+    ),
+    physics = Dict(
+        :ipot => :schwarzschild_rw,
+        :M => 1.0,
+        :ell => 2,
+    ),
+    output = OutputConfig(write_spectrum=true, write_potential=true),
+)
+
+result = solve_qnm_ecs(cfg)
+println(result.omega)
+```
+
+`ECSConfig` currently supports Dirichlet boundary conditions at the finite-box endpoints.  This is natural for ECS because outgoing waves are damped in the complex-scaled exterior regions when the box is sufficiently large.
+
+The default contour is piecewise linear:
+
+```text
+g(x) = -x0_left  + (x + x0_left) exp(i theta),   x < -x0_left,
+g(x) = x,                                         -x0_left <= x <= x0_right,
+g(x) =  x0_right + (x - x0_right) exp(i theta),  x >  x0_right.
+```
+
+For preliminary smoothing tests, set `smoothing > 0`.  The smoothed contour uses a tanh-based ramp.  The piecewise-linear contour is easier to interpret and is the recommended first diagnostic.
+
+The ECS result type is `ECSResult`:
+
+```julia
+result.energy       # eigenvalues E = omega^2
+result.omega        # branch selected with Im(omega) <= 0
+result.hamiltonian  # finite-difference ECS Hamiltonian
+result.x            # interior real grid points
+result.z            # interior ECS contour points
+result.jacobian     # dg/dx on the interior grid
+result.potential    # V(z) on the interior grid
+```
+
+For actual higher-overtone work, check stability under changes of `theta_deg`, `x0_left`, `x0_right`, `xmin`, `xmax`, and `nx`.  The ECS backend is deliberately separated from the Gaussian CSM backend so that this experimental development does not disturb the existing `solve_qnm` workflow.

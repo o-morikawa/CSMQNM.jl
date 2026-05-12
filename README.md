@@ -265,3 +265,70 @@ result.potential    # V(z) on the interior grid
 ```
 
 For actual higher-overtone work, check stability under changes of `theta_deg`, `x0_left`, `x0_right`, `xmin`, `xmax`, and `nx`.  The ECS backend is deliberately separated from the Gaussian CSM backend so that this experimental development does not disturb the existing `solve_qnm` workflow.
+
+## FEDVR-ECS backend
+
+Version `0.1.0` also includes an experimental finite-element DVR backend on the
+same exterior-complex-scaled contour.  This is intended as a higher-order
+alternative to the uniform-grid finite-difference ECS solver.
+
+The real computational coordinate is denoted by `x`, and the ECS contour is
+
+```julia
+z = g(x)
+J = dg/dx
+```
+
+The Schrödinger operator is discretized in weak form,
+
+```text
+H = -d^2/dz^2 + V(z)
+```
+
+using local Gauss-Lobatto-Legendre DVR functions on each finite element.  In
+terms of the real parameter `x`, the kinetic and overlap matrices are assembled
+as
+
+```text
+K_ab = ∫ dx J(x)^(-1) dB_a/dx dB_b/dx,
+N_ab = ∫ dx J(x) B_a(x) B_b(x),
+V_ab = ∫ dx J(x) B_a(x) V(g(x)) B_b(x).
+```
+
+The DVR quadrature makes the potential and overlap matrices diagonal up to the
+finite-element endpoint sharing.  Dirichlet boundary conditions are imposed by
+removing the two endpoint degrees of freedom.
+
+A minimal example is
+
+```julia
+using CSMQNM
+
+cfg = FEDVRECSRunConfig(
+    ecs = FEDVRECSConfig(
+        theta_deg = 60.0,
+        xmin = -240.0,
+        xmax = 240.0,
+        nelements = 120,
+        order = 10,
+        x0_left = 25.0,
+        x0_right = 25.0,
+        smoothing = 2.5,
+    ),
+    physics = Dict(
+        :ipot => :schwarzschild_rw,
+        :M => 0.5,
+        :ell => 3,
+        :s => 2,
+    ),
+    output = OutputConfig(write_spectrum=true, write_potential=true),
+)
+
+result = solve_qnm_ecs_fedvr(cfg)
+```
+
+For comparison with the finite-difference ECS backend, `nelements = 120` and
+`order = 10` gives roughly `120 * (10 - 1) + 1 = 1081` global grid points before
+Dirichlet endpoint removal.  Increasing `order` improves local spectral
+accuracy; increasing `nelements` improves spatial resolution and allows a more
+local representation of the ECS transition region.

@@ -88,3 +88,28 @@ end
     @test all(isfinite, real.(result.energy))
     @test all(isfinite, imag.(result.energy))
 end
+
+@testset "FEDVR utilities" begin
+    ξ, w = CSMQNM.legendre_gll(6)
+    @test length(ξ) == 6
+    @test length(w) == 6
+    @test ξ[1] ≈ -1.0
+    @test ξ[end] ≈ 1.0
+    @test sum(w) ≈ 2.0
+    D = CSMQNM.lagrange_derivative_matrix(ξ)
+    @test size(D) == (6, 6)
+    @test isapprox(D * ones(6), zeros(6); atol=1e-10)
+end
+
+@testset "small Schwarzschild FEDVR-ECS solve" begin
+    cfg = FEDVRECSRunConfig(
+        ecs = FEDVRECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nelements=8, order=6, x0_left=3.0, x0_right=3.0),
+        physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
+    )
+    result = solve_qnm_ecs_fedvr(cfg)
+    expected_size = cfg.ecs.nelements * (cfg.ecs.order - 1) - 1
+    @test length(result.energy) == expected_size
+    @test size(result.overlap) == (expected_size, expected_size)
+    @test all(isfinite, real.(result.energy))
+    @test all(isfinite, imag.(result.energy))
+end

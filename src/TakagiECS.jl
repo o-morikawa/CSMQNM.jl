@@ -11,7 +11,7 @@ Base.@kwdef struct TakagiECSConfig
     quadrature_panels::Int = 0
     quadrature_order::Int = 12
     overlap_cutoff::Float64 = 1e-10
-    orthogonalization::Symbol = :auto   # :auto, :takagi, :hermitian, or :none
+    orthogonalization::Symbol = :auto   # :auto, :two_step, :takagi, :hermitian, or :none
     envelope_dirichlet::Bool = true
     boundary::Symbol = :dirichlet
 end
@@ -60,7 +60,7 @@ function validate_takagi_ecs_config(cfg::TakagiECSRunConfig)
     e.quadrature_order >= 2 || error("ecs.quadrature_order must be at least 2.")
     e.quadrature_panels >= 0 || error("ecs.quadrature_panels must be non-negative. Use 0 for automatic panel count.")
     e.overlap_cutoff > 0 || error("ecs.overlap_cutoff must be positive.")
-    e.orthogonalization in (:auto, :takagi, :hermitian, :none) || error("ecs.orthogonalization must be :auto, :takagi, :hermitian, or :none.")
+    e.orthogonalization in (:auto, :two_step, :takagi, :hermitian, :none) || error("ecs.orthogonalization must be :auto, :two_step, :takagi, :hermitian, or :none.")
     theta = e.theta_deg * DEG
     0 < theta < π || error("ecs.theta_deg must satisfy 0 < theta < 180 degrees.")
     e.xmin < -e.x0_left || error("ecs.xmin must be smaller than -ecs.x0_left, leaving a left ECS absorbing region.")
@@ -162,6 +162,10 @@ function gaussian_ecs_matrices(cfg::TakagiECSRunConfig)
         end
     end
     H = K + Vmat
+    # The C-product Galerkin matrices should be complex symmetric.
+    # Explicit symmetrization removes quadrature roundoff that can destabilize Takagi.
+    N = 0.5 .* (N .+ transpose(N))
+    H = 0.5 .* (H .+ transpose(H))
     return H, N, centers, sigmas
 end
 
@@ -175,20 +179,40 @@ function factor_values_vector(d)
     end
 end
 
+function _takagi_candidate_orthogonalizers(N::AbstractMatrix, vals, U, keep)
+    Dinvhalf = Diagonal(1.0 ./ sqrt.(ComplexF64.(vals[keep])))
+    candidates = Matrix{ComplexF64}[]
+    # TakagiFactorization.jl has historically used A ≈ transpose(U) * D * U.
+    # If U is unitary, inv(U) = adjoint(U), but we keep several algebraically
+    # plausible conventions and select the one that actually satisfies S^T N S ≈ I.
+    push!(candidates, inv(Matrix(U))[:, keep] * Dinvhalf)
+    push!(candidates, adjoint(Matrix(U))[:, keep] * Dinvhalf)
+    push!(candidates, Matrix(U)[:, keep] * Dinvhalf)
+    return candidates
+end
+
 function try_takagi_orthogonalizer(N::AbstractMatrix; cutoff::Real=1e-10)
-    d, U = takagi_factor(Matrix(N), sort=-1)
+    Ns = 0.5 .* (Matrix(N) .+ transpose(Matrix(N)))
+    d, U = takagi_factor(Ns, sort=-1)
     vals = factor_values_vector(d)
-    keep = findall(vals .> cutoff)
+    scale = maximum(abs.(vals))
+    thresh = cutoff * max(scale, 1.0)
+    keep = findall(abs.(vals) .> thresh)
     isempty(keep) && error("All Takagi singular values of the overlap matrix were below cutoff=$cutoff.")
 
-    # TakagiFactorization.jl convention used here: N ≈ transpose(U) * Diagonal(vals) * U.
-    # Build S and verify S^T N S ≈ I. If the convention changes, this diagnostic catches it.
-    S = adjoint(U)[:, keep] * Diagonal(1.0 ./ sqrt.(vals[keep]))
-    err = norm(transpose(S) * Matrix(N) * S - I(length(keep))) / max(1.0, length(keep))
-    if !isfinite(err) || err > 1e-6
-        error("Takagi orthogonalization did not satisfy S^T N S ≈ I; normalized error=$err")
+    bestS = nothing
+    besterr = Inf
+    for S in _takagi_candidate_orthogonalizers(Ns, vals, U, keep)
+        err = norm(transpose(S) * Ns * S - I(length(keep))) / max(1.0, length(keep))
+        if isfinite(err) && err < besterr
+            besterr = err
+            bestS = S
+        end
     end
-    return Matrix{ComplexF64}(S), keep, vals, Float64(real(err)), :takagi
+    if bestS === nothing || !isfinite(besterr) || besterr > 1e-6
+        error("Takagi orthogonalization did not satisfy S^T N S ≈ I; best normalized error=$besterr")
+    end
+    return Matrix{ComplexF64}(bestS), keep, vals, Float64(real(besterr)), :takagi
 end
 
 function hermitian_metric_matrix(cfg::TakagiECSRunConfig, centers, sigmas)
@@ -226,9 +250,29 @@ function hermitian_conditioning_transform(cfg::TakagiECSRunConfig, centers, sigm
     thresh = cutoff * max(scale, 1.0)
     keep = findall(vals .> thresh)
     isempty(keep) && error("All Hermitian auxiliary overlap eigenvalues were below cutoff=$cutoff.")
-    S = F.vectors[:, keep] * Diagonal(1.0 ./ sqrt.(vals[keep]))
-    err = norm(adjoint(S) * Matrix(G) * S - I(length(keep))) / max(1.0, length(keep))
-    return Matrix{ComplexF64}(S), keep, vals, Float64(real(err)), :hermitian
+    P = F.vectors[:, keep] * Diagonal(1.0 ./ sqrt.(vals[keep]))
+    err = norm(adjoint(P) * Matrix(G) * P - I(length(keep))) / max(1.0, length(keep))
+    return Matrix{ComplexF64}(P), keep, vals, Float64(real(err)), :hermitian
+end
+
+function two_step_takagi_conditioner(cfg::TakagiECSRunConfig, H::AbstractMatrix, N::AbstractMatrix, centers, sigmas)
+    # Step 1: remove near-linear dependencies using a positive Hermitian auxiliary metric.
+    P, keep_h, vals_h, err_h, _ = hermitian_conditioning_transform(cfg, centers, sigmas; cutoff=cfg.ecs.overlap_cutoff)
+
+    # Step 2: preserve the C-product Galerkin structure in the reduced subspace.
+    Hred = transpose(P) * Matrix(H) * P
+    Nred = transpose(P) * Matrix(N) * P
+    Hred = 0.5 .* (Hred .+ transpose(Hred))
+    Nred = 0.5 .* (Nred .+ transpose(Nred))
+
+    # Step 3: Takagi-orthogonalize the reduced complex-symmetric overlap.
+    Sred, keep_t, vals_t, err_t, _ = try_takagi_orthogonalizer(Nred; cutoff=cfg.ecs.overlap_cutoff)
+    S = P * Sred
+    err = norm(transpose(S) * Matrix(N) * S - I(size(S, 2))) / max(1.0, size(S, 2))
+    vals = Float64.(vals_t)
+    # The first-stage keep list is not a direct index set after the second stage; use retained DOF count.
+    keep = collect(1:size(S, 2))
+    return Matrix{ComplexF64}(S), keep, vals, Float64(real(max(err, err_t, err_h))), :two_step
 end
 
 function direct_generalized_conditioning(N::AbstractMatrix; cutoff::Real=1e-10)
@@ -238,19 +282,21 @@ function direct_generalized_conditioning(N::AbstractMatrix; cutoff::Real=1e-10)
     return Matrix{ComplexF64}(I, n, n), keep, vals, 0.0, :none
 end
 
-function takagi_ecs_conditioner(cfg::TakagiECSRunConfig, N::AbstractMatrix, centers, sigmas)
+function takagi_ecs_conditioner(cfg::TakagiECSRunConfig, H::AbstractMatrix, N::AbstractMatrix, centers, sigmas)
     method = cfg.ecs.orthogonalization
     if method === :takagi
         return try_takagi_orthogonalizer(N; cutoff=cfg.ecs.overlap_cutoff)
+    elseif method === :two_step
+        return two_step_takagi_conditioner(cfg, H, N, centers, sigmas)
     elseif method === :hermitian
         return hermitian_conditioning_transform(cfg, centers, sigmas; cutoff=cfg.ecs.overlap_cutoff)
     elseif method === :none
         return direct_generalized_conditioning(N; cutoff=cfg.ecs.overlap_cutoff)
     else
         try
-            return try_takagi_orthogonalizer(N; cutoff=cfg.ecs.overlap_cutoff)
+            return two_step_takagi_conditioner(cfg, H, N, centers, sigmas)
         catch err
-            @warn "Takagi orthogonalization failed; falling back to Hermitian auxiliary-metric conditioning." exception=(err, catch_backtrace())
+            @warn "Two-step Takagi orthogonalization failed; falling back to Hermitian auxiliary-metric conditioning." exception=(err, catch_backtrace())
             return hermitian_conditioning_transform(cfg, centers, sigmas; cutoff=cfg.ecs.overlap_cutoff)
         end
     end
@@ -260,9 +306,10 @@ function solve_qnm_ecs_takagi(cfg::TakagiECSRunConfig)
     validate_takagi_ecs_config(cfg)
     H, N, centers, sigmas = gaussian_ecs_matrices(cfg)
     basis_size_before = size(H, 1)
-    S, keep, vals, err, method = takagi_ecs_conditioner(cfg, N, centers, sigmas)
-    if method === :takagi
+    S, keep, vals, err, method = takagi_ecs_conditioner(cfg, H, N, centers, sigmas)
+    if method === :takagi || method === :two_step
         Hortho = transpose(S) * H * S
+        Hortho = 0.5 .* (Hortho .+ transpose(Hortho))
         ene = eigvals(Matrix(Hortho))
     elseif method === :none
         Hortho = H
@@ -270,8 +317,10 @@ function solve_qnm_ecs_takagi(cfg::TakagiECSRunConfig)
     else
         # Hermitian auxiliary conditioning is only a basis reduction/preconditioner.
         # The physical C-product generalized problem is preserved in the reduced subspace.
-        Hred = adjoint(S) * H * S
-        Nred = adjoint(S) * N * S
+        Hred = transpose(S) * H * S
+        Nred = transpose(S) * N * S
+        Hred = 0.5 .* (Hred .+ transpose(Hred))
+        Nred = 0.5 .* (Nred .+ transpose(Nred))
         Hortho = Hred
         ene = eigvals(Matrix(Hred), Matrix(Nred))
     end

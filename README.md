@@ -367,18 +367,29 @@ K_ij = int dx J(x)^(-1) phi_i'(x) phi_j'(x),
 V_ij = int dx J(x) V(g(x)) phi_i(x) phi_j(x).
 ```
 
-Because `N` is complex symmetric rather than Hermitian, the backend first tries
-`TakagiFactorization.jl` to construct a C-product orthogonalizer satisfying
+Because `N` is complex symmetric rather than Hermitian, the default
+`orthogonalization = :auto` now uses a two-stage conditioning procedure:
+
+```text
+1. Hermitian auxiliary metric G_ij = int dx |J| conj(phi_i) phi_j
+   removes near-linear dependencies of the Gaussian packets.
+2. Takagi factorization is applied to the reduced complex-symmetric
+   C-product overlap N_red.
+```
+
+The final transform still satisfies the C-product condition
 
 ```text
 S^T N S ~= I,
 H_ortho = S^T H S.
 ```
 
-If Takagi factorization fails to converge, `orthogonalization = :auto` falls back
-to a Hermitian auxiliary-metric conditioning step.  This fallback does not replace
-the C-product generalized eigenvalue problem; it only removes nearly linearly
-dependent Gaussian packets before solving the reduced generalized problem.
+This is more stable than applying Takagi directly to the full Gaussian overlap.
+For diagnostics one may set `orthogonalization = :takagi` for direct Takagi,
+`:two_step` for the two-stage procedure, `:hermitian` for Hermitian auxiliary
+conditioning only, or `:none` for the raw generalized eigenvalue problem.  In
+`:auto`, if the two-stage Takagi step fails, the solver falls back to the
+Hermitian-reduced generalized C-product problem.
 
 A minimal example is
 

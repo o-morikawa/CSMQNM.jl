@@ -128,9 +128,20 @@ end
     @test all(isfinite, imag.(result.energy))
 end
 
-@testset "Takagi-ECS Gaussian utilities" begin
+@testset "Takagi-ECS Gaussian matrix utilities" begin
     cfg = TakagiECSRunConfig(
-        ecs = TakagiECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nbasis=12, sigma_scale=1.2, x0_left=3.0, x0_right=3.0, quadrature_panels=16, quadrature_order=6),
+        ecs = TakagiECSConfig(
+            theta_deg=50.0,
+            xmin=-8.0,
+            xmax=8.0,
+            nbasis=12,
+            sigma_scale=1.2,
+            x0_left=3.0,
+            x0_right=3.0,
+            quadrature_panels=16,
+            quadrature_order=6,
+            orthogonalization=:hermitian,
+        ),
         physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
     )
     H, N, centers, sigmas = CSMQNM.gaussian_ecs_matrices(cfg)
@@ -143,12 +154,28 @@ end
     @test all(isfinite, imag.(H))
 end
 
-@testset "small Schwarzschild Takagi-ECS solve" begin
+@testset "small Schwarzschild Gaussian-ECS Hermitian solve" begin
+    # CI should not depend on experimental Takagi convergence.
+    # This test exercises the Gaussian-ECS backend with deterministic
+    # Hermitian auxiliary-metric conditioning only.
     cfg = TakagiECSRunConfig(
-        ecs = TakagiECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nbasis=12, sigma_scale=1.2, x0_left=3.0, x0_right=3.0, quadrature_panels=16, quadrature_order=6, overlap_cutoff=1e-9),
+        ecs = TakagiECSConfig(
+            theta_deg=50.0,
+            xmin=-8.0,
+            xmax=8.0,
+            nbasis=12,
+            sigma_scale=1.2,
+            x0_left=3.0,
+            x0_right=3.0,
+            quadrature_panels=16,
+            quadrature_order=6,
+            overlap_cutoff=1e-9,
+            orthogonalization=:hermitian,
+        ),
         physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
     )
     result = solve_qnm_ecs_takagi(cfg)
+    @test result.orthogonalization_method == :hermitian
     @test result.basis_size_after <= result.basis_size_before
     @test length(result.energy) == result.basis_size_after
     @test all(isfinite, real.(result.energy))

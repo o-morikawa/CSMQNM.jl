@@ -127,3 +127,31 @@ end
     @test all(isfinite, real.(result.energy))
     @test all(isfinite, imag.(result.energy))
 end
+
+@testset "Takagi-ECS Gaussian utilities" begin
+    cfg = TakagiECSRunConfig(
+        ecs = TakagiECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nbasis=12, sigma_scale=1.2, x0_left=3.0, x0_right=3.0, quadrature_panels=16, quadrature_order=6),
+        physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
+    )
+    H, N, centers, sigmas = CSMQNM.gaussian_ecs_matrices(cfg)
+    @test size(H) == (cfg.ecs.nbasis, cfg.ecs.nbasis)
+    @test size(N) == (cfg.ecs.nbasis, cfg.ecs.nbasis)
+    @test length(centers) == cfg.ecs.nbasis
+    @test length(sigmas) == cfg.ecs.nbasis
+    @test norm(N - transpose(N)) / max(1, norm(N)) < 1e-10
+    @test all(isfinite, real.(H))
+    @test all(isfinite, imag.(H))
+end
+
+@testset "small Schwarzschild Takagi-ECS solve" begin
+    cfg = TakagiECSRunConfig(
+        ecs = TakagiECSConfig(theta_deg=50.0, xmin=-8.0, xmax=8.0, nbasis=12, sigma_scale=1.2, x0_left=3.0, x0_right=3.0, quadrature_panels=16, quadrature_order=6, overlap_cutoff=1e-9),
+        physics = Dict(:ipot=>:schwarzschild_rw, :M=>1.0, :ell=>2),
+    )
+    result = solve_qnm_ecs_takagi(cfg)
+    @test result.basis_size_after <= result.basis_size_before
+    @test length(result.energy) == result.basis_size_after
+    @test all(isfinite, real.(result.energy))
+    @test all(isfinite, imag.(result.energy))
+    @test isfinite(result.takagi_error)
+end

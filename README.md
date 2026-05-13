@@ -336,3 +336,70 @@ For comparison with the finite-difference ECS backend, `nelements = 120` and
 Dirichlet endpoint removal.  Increasing `order` improves local spectral
 accuracy; increasing `nelements` improves spatial resolution and allows a more
 local representation of the ECS transition region.
+
+## Takagi-ECS Gaussian backend
+
+Version `0.1.0` also includes an experimental Gaussian-packet ECS backend in
+`src/TakagiECS.jl`.  This backend keeps the CSM/Gaussian-expansion flavor but
+places localized Gaussian packets on the real ECS parameter `x`, rather than
+using global Gaussian functions of the scaled coordinate.
+
+The wavefunction is expanded as
+
+```text
+psi(x) = sum_i c_i phi_i(x),
+phi_i(x) = envelope(x) exp[-(x - X_i)^2 / (2 sigma_i^2)].
+```
+
+The optional envelope is enabled by default and vanishes at `xmin` and `xmax`,
+which imposes Dirichlet behavior at the outer box boundaries.  The ECS contour
+is still
+
+```text
+z = g(x),    J = dg/dx.
+```
+
+The complex-symmetric weak-form matrices are assembled as
+
+```text
+N_ij = int dx J(x) phi_i(x) phi_j(x),
+K_ij = int dx J(x)^(-1) phi_i'(x) phi_j'(x),
+V_ij = int dx J(x) V(g(x)) phi_i(x) phi_j(x).
+```
+
+Because `N` is complex symmetric rather than Hermitian, the backend uses
+`TakagiFactorization.jl` to construct a C-product orthogonalizer satisfying
+
+```text
+S^T N S ~= I,
+H_ortho = S^T H S.
+```
+
+A minimal example is
+
+```julia
+using CSMQNM
+
+cfg = TakagiECSRunConfig(
+    ecs = TakagiECSConfig(
+        theta_deg = 60.0,
+        xmin = -240.0,
+        xmax = 240.0,
+        nbasis = 240,
+        sigma_scale = 1.5,
+        x0_left = 30.0,
+        x0_right = 60.0,
+        smoothing = 5.0,
+        quadrature_order = 12,
+        overlap_cutoff = 1e-10,
+    ),
+    physics = Dict(:ipot => :schwarzschild_rw, :M => 0.5, :ell => 3, :s => 2),
+    output = OutputConfig(write_spectrum=true, write_potential=true),
+)
+
+result = solve_qnm_ecs_takagi(cfg)
+```
+
+Useful tuning parameters are `sigma_scale`, `nbasis`, `quadrature_order`, and
+`overlap_cutoff`.  If the Takagi residual `result.takagi_error` is large, reduce
+basis redundancy by decreasing `sigma_scale` or increasing `overlap_cutoff`.

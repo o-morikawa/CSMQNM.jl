@@ -344,6 +344,10 @@ Version `0.1.0` also includes an experimental Gaussian-packet ECS backend in
 places localized Gaussian packets on the real ECS parameter `x`, rather than
 using global Gaussian functions of the scaled coordinate.
 
+**Status note.** Takagi-ECS is experimental. For the present Gaussian packet
+basis, Takagi orthogonalization may fail because of severe conditioning issues.
+
+
 The wavefunction is expanded as
 
 ```text

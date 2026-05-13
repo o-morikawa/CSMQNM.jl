@@ -367,13 +367,18 @@ K_ij = int dx J(x)^(-1) phi_i'(x) phi_j'(x),
 V_ij = int dx J(x) V(g(x)) phi_i(x) phi_j(x).
 ```
 
-Because `N` is complex symmetric rather than Hermitian, the backend uses
+Because `N` is complex symmetric rather than Hermitian, the backend first tries
 `TakagiFactorization.jl` to construct a C-product orthogonalizer satisfying
 
 ```text
 S^T N S ~= I,
 H_ortho = S^T H S.
 ```
+
+If Takagi factorization fails to converge, `orthogonalization = :auto` falls back
+to a Hermitian auxiliary-metric conditioning step.  This fallback does not replace
+the C-product generalized eigenvalue problem; it only removes nearly linearly
+dependent Gaussian packets before solving the reduced generalized problem.
 
 A minimal example is
 
@@ -392,6 +397,7 @@ cfg = TakagiECSRunConfig(
         smoothing = 5.0,
         quadrature_order = 12,
         overlap_cutoff = 1e-10,
+        orthogonalization = :auto,
     ),
     physics = Dict(:ipot => :schwarzschild_rw, :M => 0.5, :ell => 3, :s => 2),
     output = OutputConfig(write_spectrum=true, write_potential=true),
@@ -401,5 +407,5 @@ result = solve_qnm_ecs_takagi(cfg)
 ```
 
 Useful tuning parameters are `sigma_scale`, `nbasis`, `quadrature_order`, and
-`overlap_cutoff`.  If the Takagi residual `result.takagi_error` is large, reduce
+`overlap_cutoff`.  If the orthogonalization residual `result.orthogonalization_error` is large, reduce
 basis redundancy by decreasing `sigma_scale` or increasing `overlap_cutoff`.

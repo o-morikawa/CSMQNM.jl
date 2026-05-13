@@ -153,5 +153,5 @@ end
     @test length(result.energy) == result.basis_size_after
     @test all(isfinite, real.(result.energy))
     @test all(isfinite, imag.(result.energy))
-    @test isfinite(result.takagi_error)
+    @test isfinite(result.orthogonalization_error)
 end

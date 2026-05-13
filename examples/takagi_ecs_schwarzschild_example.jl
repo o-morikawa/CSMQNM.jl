@@ -18,6 +18,7 @@ cfg = TakagiECSRunConfig(
         smoothing = 5.0,
         quadrature_order = 12,
         overlap_cutoff = 1e-10,
+        orthogonalization = :auto,
         envelope_dirichlet = true,
     ),
     physics = Dict(
@@ -31,7 +32,7 @@ cfg = TakagiECSRunConfig(
 
 result = solve_qnm_ecs_takagi(cfg)
 println("kept basis vectors: ", result.basis_size_after, " / ", result.basis_size_before)
-println("Takagi orthogonalization residual: ", result.takagi_error)
+println("orthogonalization residual: ", result.orthogonalization_error)
 println("first few omega values:")
 for w in result.omega[1:min(end, 10)]
     println(w)

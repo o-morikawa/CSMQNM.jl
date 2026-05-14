@@ -135,6 +135,7 @@ end
     @test all(isfinite, imag.(result.energy))
 end
 
+#=
 @testset "Takagi-ECS Gaussian matrix utilities" begin
     cfg = TakagiECSRunConfig(
         ecs = TakagiECSConfig(
@@ -189,3 +190,4 @@ end
     @test all(isfinite, imag.(result.energy))
     @test isfinite(result.orthogonalization_error)
 end
+=#

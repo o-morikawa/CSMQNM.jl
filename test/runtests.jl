@@ -62,9 +62,9 @@ end
     @test CSMQNM.ecs_jacobian(5.0, ecs) ≈ exp(im * 60.0 * π / 180)
 end
 
-#=
+
 @testset "ECS kinetic matrix" begin
-    ecs = ECSConfig(theta_deg=1e-12, xmin=-1.0, xmax=1.0, nx=5, x0_left=0.5, x0_right=0.5)
+    ecs = ECSConfig(theta_deg=0.0, xmin=-1.0, xmax=1.0, nx=5, x0_left=0.5, x0_right=0.5)
     x = collect(range(ecs.xmin, ecs.xmax; length=ecs.nx))
     T = CSMQNM.ecs_kinetic_matrix(x, ecs)
     dx = x[2] - x[1]
@@ -76,7 +76,6 @@ end
     @test T ≈ ComplexF64.(expected)
     @test count(!iszero, T) == 7
 end
-=#
 
 @testset "small Schwarzschild ECS solve" begin
     cfg = ECSRunConfig(

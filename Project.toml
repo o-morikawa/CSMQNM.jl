@@ -11,6 +11,9 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 TakagiFactorization = "2a98de0d-ca3b-5770-8d1d-3c2c55f12676"
 
 [compat]
+AutoTortoise = "0.1"
+LambertW = "1"
+TakagiFactorization = "0.1"
 julia = "1.10"
 
 [extras]

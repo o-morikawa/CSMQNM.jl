@@ -64,7 +64,14 @@ end
 
 
 @testset "ECS kinetic matrix" begin
-    ecs = ECSConfig(theta_deg=0.0, xmin=-1.0, xmax=1.0, nx=5, x0_left=0.5, x0_right=0.5)
+    ecs = ECSConfig(
+        theta_deg=1e-12,
+        xmin=-1.0,
+        xmax=1.0,
+        nx=5,
+        x0_left=0.5,
+        x0_right=0.5,
+    )
     x = collect(range(ecs.xmin, ecs.xmax; length=ecs.nx))
     T = CSMQNM.ecs_kinetic_matrix(x, ecs)
     dx = x[2] - x[1]
